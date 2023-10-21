@@ -1,0 +1,262 @@
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        h1 { margin-bottom: 0 }
+
+        h2 {
+            margin: 8px 14px;
+            font-size: 1.2rem;
+            padding: 2px 6px;
+        }
+		
+		h1, h2, h3 { font-weight: 500 }
+
+        fieldset {
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #ccc;
+            background: #fff;
+            box-shadow: 0 4px 8px #0002;
+            border-radius: 12px;
+            padding: 8px 0;
+            margin: 0;
+        }
+
+        input[type="checkbox"] {
+            margin: 0;
+			width: 16px;
+        }
+		
+        label {
+            padding: 6px 22px;
+			display: flex;
+			gap: 12px;
+        }
+
+        body {
+		    accent-color: #000;
+            font-family: Roboto,  sans-serif;
+            display: flex;
+            flex-direction: column;
+            background: #f6f6f8;
+            margin: 16px auto;
+            align-items: center;
+			font-size: 14px;
+        }
+
+        section, select {
+            max-width: 600px;
+            width: 100%;
+        }
+		
+		section { gap: 16px; flex-direction: column; display: flex }
+
+        td:first-child {
+            font-weight: 600;
+            white-space: nowrap;
+            text-align: right;
+            margin-right: 8px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        td {
+            font-size: 12px;
+            font-family: monospace;
+            vertical-align: top;
+        }
+
+        select {
+            padding: 4px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+		
+		.pad { margin-left: 28px}
+		
+		label:not(.pad):hover {
+			background: #eee;
+		}
+		
+		.drop {
+			margin-top: 32px;
+            border: 2px dashed #bbb;
+            border-radius: 8px;
+            padding: 96px 24px;
+            text-align: center;
+            flex-direction: column;
+		}
+		
+		a {
+            padding: 2px 0;
+            color: #000;
+            text-decoration: none;
+            border-bottom: 1px solid;
+		}
+		
+		small { opacity: .75 }
+    </style>
+    <title>Подпись КриптоПро</title>
+</head>
+<body>
+    <h1>КриптоПро онлайн</h1>
+    <h2>Подпись с помощью <a href="https://www.cryptopro.ru/products/cades/plugin">CAdES плагина</a></h2>
+    <section>
+        <label class="drop"><input type="file" id="fileSigner" style="display:none">
+        <h3 style="margin:0">Подписать файл</h3>
+        Перетащите файл или нажмите здесь, чтобы выбрать файл для подписи.</label>
+            
+        <fieldset>
+            <h2>Параметры</h2>
+            <label>
+                <input type="checkbox" data-param="detached">
+                <span>Создать отсоединенную подпись</span>
+            </label>
+            <label class="pad">
+                <span>Сертификат</span>
+            </label>
+            <label class="pad">
+                <select id="certs"></select>
+            </label>
+            <label>
+                <details>
+                    <summary>&nbsp;&nbsp;&nbsp;Информация</summary>
+                    <table id="certInfo"></table>
+                </details>
+            </label>
+        </fieldset>
+		<center>
+			<small>
+				<br>Данные не покидают этот компьютер. Подпись происходит локально.
+				<br>© fordownloads, 2023 · <a href="https://github.com/fordownloads/cryptopro-web">Исходный код</a>
+			</small>
+		</center>
+    </section>
+	<script src="https://unpkg.com/crypto-pro@2.5.0/dist/crypto-pro.min.js"></script>
+	<script>
+		const settings = JSON.parse(localStorage["settings"] ?? '{"certName":"Не выбран","cert":"null"}')
+
+		const save = detail => {
+			Object.assign(settings, detail)
+			localStorage["settings"] = JSON.stringify(settings)
+		}
+
+		const tablefy = v =>
+			'<table>' +
+			v
+				.replace(/(.*?)="(.*?)"(, |$)/g, '$1:::$2\n\n')
+				.replace(/(.*?)=(.*?)(, |$)/g, '$1:::$2\n\n')
+				.replaceAll('""', '"').trim()
+				.split('\n\n').map(kv => {
+					const [k, v] = kv.split(':::')
+					return `<tr><td>${k}</td><td>${v}</td></tr>`
+				}).join('') +
+			'</table>'
+
+		const resolveTable = {
+			name: ['Имя', v => v.replaceAll('""', '"').replace(/(^"|"$)/g, '')],
+			issuerName: ['Издатель', tablefy],
+			subjectName: ['Субъект', tablefy],
+			thumbprint: ['Отпечаток', v => v],
+			validFrom: ['Действителен с', v => new Date(v).toLocaleString()],
+			validTo: ['Действителен по', v => new Date(v).toLocaleString()]
+		}
+
+		const prettify = ([k, v]) => {
+			const rt = resolveTable[k]
+			return `<tr><td>${rt[0]}</td><td>${rt[1](v)}</td></tr>`
+		}
+
+
+		document.querySelectorAll('input[data-param]').forEach(cb => {
+			cb.checked = settings[cb.dataset.param] === 'true'
+			cb.onchange = () => save({ [cb.dataset.param]: cb.checked.toString() })
+		})
+
+		const certs = document.querySelector('#certs')
+		const certInfoToggle = document.querySelector('details')
+		const certInfo = document.querySelector('#certInfo')
+
+		const fo = document.createElement('option')
+		fo.text = settings.certName
+		fo.value = settings.cert
+		certs.appendChild(fo)
+		certs.selectedIndex = 0
+
+		certs.onchange = () => {
+			const o = certs.selectedOptions[0]
+			const info = Object.entries(o.cert).filter(([k]) => !k.startsWith('_')).map(prettify).join('\n')
+			certInfo.innerHTML = info
+			save({ cert: certs.value, certName: o.text })
+		}
+
+		const loadCerts = e => {
+			fo.text = "Загрузка сертификатов..."
+			certs.onclick = null
+			certInfoToggle.ontoggle = null
+			window.cryptoPro.getUserCertificates()
+				.then(certList => {
+					fo.remove()
+					certList.forEach(cert => {
+						const o = document.createElement('option');
+						o.textContent = `${cert.name.slice(0, 40)} (${cert.validTo.split('T')[0].split('-').reverse().join('.')})`.replace("\"", "")
+						o.title = cert.name
+						o.value = cert.thumbprint
+						o.cert = cert
+						certs.appendChild(o)
+					});
+
+					if (!settings.cert || settings.cert === "null")
+						certs.selectedIndex = 0
+					else
+						certs.value = settings.cert
+					certs.dispatchEvent(new Event('change'))
+				})
+				.catch(err => {
+					fo.text = settings.certName
+					certInfo.textContent = err.message
+					certInfo.parentElement.open = true
+					certs.disabled = true
+				})
+		}
+
+		document.querySelector("#fileSigner").onchange = e => {
+			if (!settings.cert || settings.cert === "null")
+				return alert('Выберите сертификат!')
+			
+			const file = e.target.files[0]
+			let reader = new FileReader();
+		  
+			reader.onload = async () => {
+				e.target.value = ''
+				const message = new Uint8Array(reader.result)
+				const hash = await window.cryptoPro.createHash(message)
+
+				const signaturePromise = 
+					settings.detached !== 'false'
+					? window.cryptoPro.createDetachedSignature(settings.cert, hash)
+					: window.cryptoPro.createAttachedSignature(settings.cert, message)
+
+				signaturePromise
+					.then(signature => {
+						const a = document.createElement('a');
+						a.href = 'data:application/octet-stream;base64,'+signature
+						a.download = file.name + '.sig'
+						a.click()
+					}, error => alert(error.message))
+			}
+		  
+			reader.readAsArrayBuffer(file)
+		}
+
+		certInfoToggle.ontoggle = loadCerts
+		certs.onclick = loadCerts
+	</script>
+</body>
+</html>
